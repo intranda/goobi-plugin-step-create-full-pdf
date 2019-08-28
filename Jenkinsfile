@@ -23,7 +23,7 @@ pipeline {
 
     stage('build') {
       steps {
-        sh 'mvn -f goobi-plugin-step-creatfullpdf/pom.xml install'
+        sh 'mvn -f goobi-plugin-step-createfullpdf/pom.xml install'
         recordIssues enabledForFailure: true, aggregatingResults: true, tools: [java(), javaDoc()]
       }
     }
