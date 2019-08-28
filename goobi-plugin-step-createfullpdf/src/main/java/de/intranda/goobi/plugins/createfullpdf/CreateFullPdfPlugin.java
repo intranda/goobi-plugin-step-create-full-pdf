@@ -7,6 +7,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Date;
 import java.util.HashMap;
@@ -115,7 +116,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
 
             req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
-            //TODO: make this configurable
+
             if (config.getBoolean("useMasterImages")) {
                 req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
             } else {
@@ -132,7 +133,8 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 Files.createDirectories(pdfDir);
             }
             ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
-            try (OutputStream os = Files.newOutputStream(fullPdfFile, StandardOpenOption.CREATE)) {
+            try (OutputStream os =
+                    Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
                 new GetMetsPdfAction().writePdf(req, csConfig, os);
             } catch (ContentLibException e) {
                 log.error(e);
@@ -148,7 +150,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             int counter = 1;
             for (File pdfFile : createdPdfs) {
                 Path newName = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", counter));
-                Files.move(pdfFile.toPath(), newName);
+                Files.move(pdfFile.toPath(), newName, StandardCopyOption.REPLACE_EXISTING);
                 counter++;
             }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
