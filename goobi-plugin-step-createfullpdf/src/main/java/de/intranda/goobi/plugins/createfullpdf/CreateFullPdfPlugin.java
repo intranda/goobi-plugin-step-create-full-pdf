@@ -53,7 +53,8 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     @Override
     public boolean execute() {
-        return true;
+        PluginReturnValue ret = run();
+        return ret != PluginReturnValue.ERROR;
     }
 
     @Override
@@ -122,7 +123,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
 
             Path pdfDir = Paths.get(p.getOcrPdfDirectory());
-            Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "fullpdf");
+            Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
             Path fullPdfFile = fullPdfDir.resolve("full.pdf");
             if (!Files.exists(fullPdfDir)) {
                 Files.createDirectories(fullPdfDir);
