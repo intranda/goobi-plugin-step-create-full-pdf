@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.configuration.XMLConfiguration;
 import org.goobi.beans.LogEntry;
 import org.goobi.beans.Process;
 import org.goobi.beans.Step;
@@ -27,6 +28,7 @@ import org.goobi.production.plugin.interfaces.IStepPluginVersion2;
 import de.intranda.digiverso.pdf.PDFConverter;
 import de.intranda.digiverso.pdf.exception.PDFReadException;
 import de.intranda.digiverso.pdf.exception.PDFWriteException;
+import de.sub.goobi.config.ConfigPlugins;
 import de.sub.goobi.helper.exceptions.DAOException;
 import de.sub.goobi.helper.exceptions.SwapException;
 import de.sub.goobi.persistence.managers.ProcessManager;
@@ -104,6 +106,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     @Override
     public PluginReturnValue run() {
+        XMLConfiguration config = ConfigPlugins.getPluginConfig(TITLE);
         Process p = step.getProzess();
         Map<String, String> parameters = new HashMap<>();
         try {
@@ -111,8 +114,12 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
 
             req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
-            //TODO: make this configurable            
-            req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
+            //TODO: make this configurable
+            if (config.getBoolean("useMasterImages")) {
+                req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
+            } else {
+                req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
+            }
 
             Path pdfDir = Paths.get(p.getOcrPdfDirectory());
             Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "fullpdf");
