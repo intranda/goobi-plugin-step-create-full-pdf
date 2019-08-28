@@ -1,14 +1,17 @@
 package de.intranda.goobi.plugins.createfullpdf;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.configuration.XMLConfiguration;
@@ -143,13 +146,13 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 return PluginReturnValue.ERROR;
             }
             // now split pdf
-            PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
-            //            int counter = 1;
-            //            for (File pdfFile : createdPdfs) {
-            //                Path newName = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", counter));
-            //                Files.move(pdfFile.toPath(), newName, StandardCopyOption.REPLACE_EXISTING);
-            //                counter++;
-            //            }
+            List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
+
+            for (int i = createdPdfs.size(); i >= 0; i--) {
+                File pdfFile = createdPdfs.get(i);
+                Path newName = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
+                Files.move(pdfFile.toPath(), newName, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
             LogEntry entry = LogEntry.build(p.getId())
