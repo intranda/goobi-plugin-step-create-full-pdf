@@ -148,7 +148,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             // now split pdf
             List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
 
-            for (int i = createdPdfs.size(); i >= 0; i--) {
+            for (int i = createdPdfs.size() - 1; i >= 0; i--) {
                 File pdfFile = createdPdfs.get(i);
                 Path newName = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
                 Files.move(pdfFile.toPath(), newName, StandardCopyOption.REPLACE_EXISTING);
