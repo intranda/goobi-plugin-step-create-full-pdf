@@ -125,7 +125,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
             Path pdfDir = Paths.get(p.getOcrPdfDirectory());
             Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
-            Path fullPdfFile = fullPdfDir.resolve("full.pdf");
+            Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
             if (!Files.exists(fullPdfDir)) {
                 Files.createDirectories(fullPdfDir);
             }
@@ -147,11 +147,19 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
             // now split pdf
             List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
+            String[] altoNames = new File(p.getOcrAltoDirectory()).list();
 
             for (int i = createdPdfs.size() - 1; i >= 0; i--) {
                 File pdfFile = createdPdfs.get(i);
-                Path newName = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
-                Files.move(pdfFile.toPath(), newName, StandardCopyOption.REPLACE_EXISTING);
+                Path newPath = null;
+                if (altoNames != null && altoNames.length == createdPdfs.size()) {
+                    String altoName = altoNames[i];
+                    String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
+                    newPath = pdfFile.toPath().resolveSibling(newName);
+                } else {
+                    newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
+                }
+                Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
