@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -146,21 +148,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 return PluginReturnValue.ERROR;
             }
             // now split pdf
-            List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
-            String[] altoNames = new File(p.getOcrAltoDirectory()).list();
-
-            for (int i = createdPdfs.size() - 1; i >= 0; i--) {
-                File pdfFile = createdPdfs.get(i);
-                Path newPath = null;
-                if (altoNames != null && altoNames.length == createdPdfs.size()) {
-                    String altoName = altoNames[i];
-                    String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
-                    newPath = pdfFile.toPath().resolveSibling(newName);
-                } else {
-                    newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
-                }
-                Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
-            }
+            splitPdf(pdfDir, fullPdfFile, p.getOcrAltoDirectory());
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
             LogEntry entry = LogEntry.build(p.getId())
@@ -179,6 +167,27 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             return PluginReturnValue.ERROR;
         }
         return PluginReturnValue.FINISH;
+    }
+
+    public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir)
+            throws PDFWriteException, PDFReadException, SwapException, DAOException, IOException, InterruptedException {
+        List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
+        String[] altoNames = new File(altoDir).list();
+        Arrays.sort(altoNames);
+        Collections.sort(createdPdfs);
+
+        for (int i = createdPdfs.size() - 1; i >= 0; i--) {
+            File pdfFile = createdPdfs.get(i);
+            Path newPath = null;
+            if (altoNames != null && altoNames.length == createdPdfs.size()) {
+                String altoName = altoNames[i];
+                String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
+                newPath = pdfFile.toPath().resolveSibling(newName);
+            } else {
+                newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
+            }
+            Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     @Override
