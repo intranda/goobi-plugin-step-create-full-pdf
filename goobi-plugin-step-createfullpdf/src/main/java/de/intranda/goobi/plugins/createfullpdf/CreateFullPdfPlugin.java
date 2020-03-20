@@ -173,7 +173,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             throws PDFWriteException, PDFReadException, SwapException, DAOException, IOException, InterruptedException {
         List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
         String[] altoNames = new File(altoDir).list();
-        Arrays.sort(altoNames);
+        if (altoNames != null) {
+            Arrays.sort(altoNames);
+        }
         Collections.sort(createdPdfs);
 
         for (int i = createdPdfs.size() - 1; i >= 0; i--) {
