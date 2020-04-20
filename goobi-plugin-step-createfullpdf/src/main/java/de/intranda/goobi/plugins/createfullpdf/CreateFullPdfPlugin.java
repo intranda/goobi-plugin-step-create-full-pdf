@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.configuration.XMLConfiguration;
+import org.apache.commons.io.FileUtils;
 import org.goobi.beans.LogEntry;
 import org.goobi.beans.Process;
 import org.goobi.beans.Step;
@@ -149,6 +150,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
             // now split pdf
             splitPdf(pdfDir, fullPdfFile, p.getOcrAltoDirectory());
+            if (config.getBoolean("deleteFullPdf", false)) {
+                FileUtils.deleteQuietly(fullPdfDir.toFile());
+            }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
             LogEntry entry = LogEntry.build(p.getId())

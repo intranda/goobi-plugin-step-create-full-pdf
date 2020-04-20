@@ -2,4 +2,7 @@
 	<useMasterImages>
 		false
 	</useMasterImages>
+	<deleteFullPdf>
+		false
+	</deleteFullPdf>
 </config>
