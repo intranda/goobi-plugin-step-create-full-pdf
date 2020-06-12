@@ -1,14 +1,18 @@
 package de.intranda.goobi.plugins.createfullpdf;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.MalformedURLException;
 import java.net.URISyntaxException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
@@ -18,6 +22,8 @@ import java.util.Map;
 
 import org.apache.commons.configuration.XMLConfiguration;
 import org.apache.commons.io.FileUtils;
+import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.goobi.beans.LogEntry;
 import org.goobi.beans.Process;
 import org.goobi.beans.Step;
@@ -37,6 +43,7 @@ import de.sub.goobi.helper.exceptions.DAOException;
 import de.sub.goobi.helper.exceptions.SwapException;
 import de.sub.goobi.persistence.managers.ProcessManager;
 import de.unigoettingen.sub.commons.contentlib.exceptions.ContentLibException;
+import de.unigoettingen.sub.commons.contentlib.servlet.controller.GetPdfAction;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.ContentServerConfiguration;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.MetsPdfRequest;
 import lombok.extern.log4j.Log4j;
@@ -113,45 +120,25 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     public PluginReturnValue run() {
         XMLConfiguration config = ConfigPlugins.getPluginConfig(TITLE);
         Process p = step.getProzess();
-        Map<String, String> parameters = new HashMap<>();
         try {
             Path metsP = Paths.get(p.getMetadataFilePath());
-            MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
-
-            req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
-
-            if (config.getBoolean("useMasterImages")) {
-                req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
-            } else {
-                req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
-            }
 
             Path pdfDir = Paths.get(p.getOcrPdfDirectory());
             Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
             Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
-            if (!Files.exists(fullPdfDir)) {
-                Files.createDirectories(fullPdfDir);
-            }
             if (!Files.exists(pdfDir)) {
                 Files.createDirectories(pdfDir);
             }
-            ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
-            try (OutputStream os =
-                    Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
-                new GetMetsPdfAction().writePdf(req, csConfig, os);
-            } catch (ContentLibException e) {
-                log.error(e);
-                LogEntry entry = LogEntry.build(p.getId())
-                        .withContent("PdfCreation: error while creating PDF file - for full details see the log file")
-                        .withType(LogType.ERROR)
-                        .withCreationDate(new Date());
-                ProcessManager.saveLogEntry(entry);
-                return PluginReturnValue.ERROR;
-            }
-            // now split pdf
-            splitPdf(pdfDir, fullPdfFile, p.getOcrAltoDirectory());
-            if (config.getBoolean("deleteFullPdf", false)) {
-                FileUtils.deleteQuietly(fullPdfDir.toFile());
+            if (config.getBoolean("writeSinglePdfsFirst", true)) {
+                boolean ok = createPdfsSinglePageFirst(config, p, pdfDir, fullPdfFile);
+                if (!ok) {
+                    return PluginReturnValue.ERROR;
+                }
+            } else {
+                boolean ok = createPdfsFullPdfFirst(config, p, metsP, pdfDir, fullPdfDir, fullPdfFile);
+                if (!ok) {
+                    return PluginReturnValue.ERROR;
+                }
             }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
@@ -171,6 +158,104 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             return PluginReturnValue.ERROR;
         }
         return PluginReturnValue.FINISH;
+    }
+
+    private boolean createPdfsFullPdfFirst(XMLConfiguration config, Process p, Path metsP, Path pdfDir, Path fullPdfDir,
+            Path fullPdfFile)
+            throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
+        if (!Files.exists(fullPdfDir)) {
+            Files.createDirectories(fullPdfDir);
+        }
+        ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
+        Map<String, String> parameters = new HashMap<>();
+        MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
+
+        req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
+
+        if (config.getBoolean("useMasterImages")) {
+            req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
+        } else {
+            req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
+        }
+        try (OutputStream os =
+                Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE,
+                        StandardOpenOption.CREATE)) {
+            new GetMetsPdfAction().writePdf(req, csConfig, os);
+
+        } catch (ContentLibException e) {
+            log.error(e);
+            LogEntry entry = LogEntry.build(p.getId())
+                    .withContent("PdfCreation: error while creating PDF file - for full details see the log file")
+                    .withType(LogType.ERROR)
+                    .withCreationDate(new Date());
+            ProcessManager.saveLogEntry(entry);
+            return false;
+        }
+        // now split pdf
+        splitPdf(pdfDir, fullPdfFile, p.getOcrAltoDirectory());
+        if (config.getBoolean("deleteFullPdf", false)) {
+            FileUtils.deleteQuietly(fullPdfDir.toFile());
+        }
+        return true;
+    }
+
+    private boolean createPdfsSinglePageFirst(XMLConfiguration config, Process p, Path pdfDir, Path fullPdfFile)
+            throws SwapException, DAOException, IOException, InterruptedException, MalformedURLException, FileNotFoundException {
+        Path altoDir = Paths.get(p.getOcrAltoDirectory());
+        Path sourceDir = null;
+        if (config.getBoolean("useMasterImages")) {
+            sourceDir = Paths.get(p.getImagesOrigDirectory(false));
+        } else {
+            sourceDir = Paths.get(p.getImagesTifDirectory(false));
+        }
+        List<File> pdfFiles = new ArrayList<File>();
+        try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(sourceDir)) {
+            for (Path imageFile : dirStream) {
+                String imageFilename = imageFile.getFileName().toString();
+                int lastDotIdx = imageFilename.lastIndexOf('.');
+                String pdfFilename = imageFilename.substring(0, lastDotIdx) + ".pdf";
+                String altoFilename = imageFilename.substring(0, lastDotIdx) + ".xml";
+                Path pdfPath = pdfDir.resolve(pdfFilename);
+                try (OutputStream os = Files.newOutputStream(pdfPath)) {
+                    try {
+                        Map<String, String> singlePdfParameters = new HashMap<>();
+                        singlePdfParameters.put("images", imageFile.toUri().toString());
+                        Path altoPath = altoDir.resolve(altoFilename);
+                        if (Files.exists(altoPath)) {
+                            singlePdfParameters.put("altos", altoPath.toUri().toString());
+                        }
+                        //                                singlePdfParameters.put("imageSource", imageFile.toUri().toString());
+                        new GetPdfAction().writePdf(singlePdfParameters, os);
+                        pdfFiles.add(pdfPath.toFile());
+                    } catch (ContentLibException e) {
+                        log.error(e);
+                        LogEntry entry = LogEntry.build(p.getId())
+                                .withContent("PdfCreation: error while creating PDF file - for full details see the log file")
+                                .withType(LogType.ERROR)
+                                .withCreationDate(new Date());
+                        ProcessManager.saveLogEntry(entry);
+                        return false;
+                    }
+                }
+            }
+        }
+        if (!config.getBoolean("deleteFullPdf", false)) {
+            if (!Files.exists(fullPdfFile.getParent())) {
+                Files.createDirectories(fullPdfFile.getParent());
+            }
+            PDFMergerUtility pdfMerger = new PDFMergerUtility();
+            Collections.sort(pdfFiles);
+            for (File pdfFile : pdfFiles) {
+                pdfMerger.addSource(pdfFile);
+            }
+            try (OutputStream os =
+                    Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE,
+                            StandardOpenOption.CREATE)) {
+                pdfMerger.setDestinationStream(os);
+                pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l));
+            }
+        }
+        return false;
     }
 
     public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir)

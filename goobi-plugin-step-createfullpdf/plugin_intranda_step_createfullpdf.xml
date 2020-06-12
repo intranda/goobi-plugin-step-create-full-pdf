@@ -1,4 +1,7 @@
 <config>
+	<writeSinglePdfsFirst>
+		true
+	</writeSinglePdfsFirst>
 	<useMasterImages>
 		false
 	</useMasterImages>
