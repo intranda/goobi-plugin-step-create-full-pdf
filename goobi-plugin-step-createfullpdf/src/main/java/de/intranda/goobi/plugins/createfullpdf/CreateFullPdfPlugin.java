@@ -255,7 +255,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l));
             }
         }
-        return false;
+        return true;
     }
 
     public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir)
