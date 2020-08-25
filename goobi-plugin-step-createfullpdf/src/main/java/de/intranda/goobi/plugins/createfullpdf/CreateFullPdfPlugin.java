@@ -39,6 +39,7 @@ import de.intranda.digiverso.pdf.PDFConverter;
 import de.intranda.digiverso.pdf.exception.PDFReadException;
 import de.intranda.digiverso.pdf.exception.PDFWriteException;
 import de.sub.goobi.config.ConfigPlugins;
+import de.sub.goobi.helper.NIOFileUtils;
 import de.sub.goobi.helper.exceptions.DAOException;
 import de.sub.goobi.helper.exceptions.SwapException;
 import de.sub.goobi.persistence.managers.ProcessManager;
@@ -209,7 +210,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             sourceDir = Paths.get(p.getImagesTifDirectory(false));
         }
         List<File> pdfFiles = new ArrayList<File>();
-        try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(sourceDir)) {
+        try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(sourceDir, NIOFileUtils.imageNameFilter)) {
             for (Path imageFile : dirStream) {
                 String imageFilename = imageFile.getFileName().toString();
                 int lastDotIdx = imageFilename.lastIndexOf('.');
