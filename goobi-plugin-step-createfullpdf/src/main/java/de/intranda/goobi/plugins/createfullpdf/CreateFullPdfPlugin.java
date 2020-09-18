@@ -59,7 +59,6 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     @Override
     public void initialize(Step step, String returnPath) {
-        // TODO Auto-generated method stub
         this.step = step;
     }
 
@@ -71,49 +70,41 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     @Override
     public String cancel() {
-        // TODO Auto-generated method stub
         return null;
     }
 
     @Override
     public String finish() {
-        // TODO Auto-generated method stub
         return null;
     }
 
     @Override
     public HashMap<String, StepReturnValue> validate() {
-        // TODO Auto-generated method stub
         return null;
     }
 
     @Override
     public Step getStep() {
-        // TODO Auto-generated method stub
         return step;
     }
 
     @Override
     public PluginGuiType getPluginGuiType() {
-        // TODO Auto-generated method stub
         return PluginGuiType.NONE;
     }
 
     @Override
     public String getPagePath() {
-        // TODO Auto-generated method stub
         return null;
     }
 
     @Override
     public PluginType getType() {
-        // TODO Auto-generated method stub
         return PluginType.Step;
     }
 
     @Override
     public String getTitle() {
-        // TODO Auto-generated method stub
         return TITLE;
     }
 
@@ -284,7 +275,6 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     @Override
     public int getInterfaceVersion() {
-        // TODO Auto-generated method stub
         return 0;
     }
 
