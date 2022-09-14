@@ -1,14 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <config_plugin>
-    <!-- order of configuration is: 1.) project name and step name matches 2.)
-        step name matches and project is * 3.) project name matches and step name
-        is * 4.) project name and step name are * -->
+    <!-- order of configuration is: 
+         1.) project name and step name matches 
+         2.) step name matches and project is * 
+         3.) project name matches and step name is * 
+         4.) project name and step name are * 
+    -->
     <config>
         <!-- which projects to use for (can be more then one, otherwise use *) -->
         <project>*</project>
+
         <!-- which stepss to use for (can be more then one, otherwise use *) -->
         <step>*</step>
-        <!-- use images from master or media folder -->
+
+         <!-- Choose the source images folder that shall be used for PDF generation. Possible values are 'media' and 'master' -->
         <imagesFolder>media</imagesFolder>
+        
         <!-- if set to true, create single page pdf files first, merge them to a large file -->
         <!-- if set to false, create a pdf for all images, split them afterwards -->
         <pagePdf enabled="true" /> 
