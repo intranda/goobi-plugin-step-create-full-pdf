@@ -15,11 +15,11 @@
 
          <!-- Choose the source images folder that shall be used for PDF generation. Possible values are 'media' and 'master' -->
         <imagesFolder>media</imagesFolder>
-        
-        <!-- if set to true, create single page pdf files first, merge them to a large file -->
-        <!-- if set to false, create a pdf for all images, split them afterwards -->
+
+        <!-- If enabled, PDF files for every single image are generated -->
         <pagePdf enabled="true" /> 
-        <!-- keep the full pdf  if set to true, delete it otherwise -->
+
+        <!-- If enabled, a PDF file for the entire record is generated. This file includes the table of contents from the METS file if exists. -->
         <fullPdf enabled="true" />
     </config>
     
