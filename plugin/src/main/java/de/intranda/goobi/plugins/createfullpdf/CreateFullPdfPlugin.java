@@ -13,7 +13,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +24,6 @@ import org.apache.commons.configuration.tree.xpath.XPathExpressionEngine;
 import org.apache.commons.io.FileUtils;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
-import org.goobi.beans.LogEntry;
 import org.goobi.beans.Process;
 import org.goobi.beans.Step;
 import org.goobi.presentation.contentServlet.controller.GetMetsPdfAction;
@@ -40,10 +38,10 @@ import de.intranda.digiverso.pdf.PDFConverter;
 import de.intranda.digiverso.pdf.exception.PDFReadException;
 import de.intranda.digiverso.pdf.exception.PDFWriteException;
 import de.sub.goobi.config.ConfigPlugins;
+import de.sub.goobi.helper.Helper;
 import de.sub.goobi.helper.NIOFileUtils;
 import de.sub.goobi.helper.exceptions.DAOException;
 import de.sub.goobi.helper.exceptions.SwapException;
-import de.sub.goobi.persistence.managers.ProcessManager;
 import de.unigoettingen.sub.commons.contentlib.exceptions.ContentLibException;
 import de.unigoettingen.sub.commons.contentlib.servlet.controller.GetPdfAction;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.ContentServerConfiguration;
@@ -168,19 +166,13 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
-            LogEntry entry = LogEntry.build(p.getId())
-                    .withContent("PdfCreation: error while creating PDF file - for full details see the log file") //NOSONAR
-                    .withType(LogType.ERROR)
-                    .withCreationDate(new Date());
-            ProcessManager.saveLogEntry(entry);
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
+                    "PdfCreation: error while creating PDF file - for full details see the log file", "");
             return PluginReturnValue.ERROR;
         } catch (PDFWriteException | PDFReadException e) {
             log.error(e);
-            LogEntry entry = LogEntry.build(p.getId())
-                    .withContent("PdfCreation: error while splitting PDF file - for full details see the log file")
-                    .withType(LogType.ERROR)
-                    .withCreationDate(new Date());
-            ProcessManager.saveLogEntry(entry);
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
+                    "PdfCreation: error while splitting PDF file - for full details see the log file", "");
             return PluginReturnValue.ERROR;
         }
         return PluginReturnValue.FINISH;
@@ -209,11 +201,8 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         } catch (ContentLibException e) {
             log.error(e);
-            LogEntry entry = LogEntry.build(p.getId())
-                    .withContent("PdfCreation: error while creating PDF file - for full details see the log file")
-                    .withType(LogType.ERROR)
-                    .withCreationDate(new Date());
-            ProcessManager.saveLogEntry(entry);
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
+                    "PdfCreation: error while creating PDF file - for full details see the log file", "");
             return false;
         }
         // now split pdf
@@ -253,11 +242,8 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                         pdfFiles.add(pdfPath.toFile());
                     } catch (ContentLibException e) {
                         log.error(e);
-                        LogEntry entry = LogEntry.build(p.getId())
-                                .withContent("PdfCreation: error while creating PDF file - for full details see the log file")
-                                .withType(LogType.ERROR)
-                                .withCreationDate(new Date());
-                        ProcessManager.saveLogEntry(entry);
+                        Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
+                                "PdfCreation: error while creating PDF file - for full details see the log file", "");
                         return false;
                     }
                 }
