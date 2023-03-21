@@ -56,6 +56,8 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private static final long serialVersionUID = -5076430372560062201L;
 
     private static final String TITLE = "intranda_step_createfullpdf";
+    private static final String ERROR_CREATING_MESSAGE = "PdfCreation: error while creating PDF file - for full details see the log file";
+    private static final String ERROR_SPLITING_MESSAGE = "PdfCreation: error while splitting PDF file - for full details see the log file";
     private Step step;
 
     @Override
@@ -166,13 +168,11 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
         } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
             log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
-                    "PdfCreation: error while creating PDF file - for full details see the log file", "");
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
             return PluginReturnValue.ERROR;
         } catch (PDFWriteException | PDFReadException e) {
             log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
-                    "PdfCreation: error while splitting PDF file - for full details see the log file", "");
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_SPLITING_MESSAGE, "");
             return PluginReturnValue.ERROR;
         }
         return PluginReturnValue.FINISH;
@@ -201,8 +201,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         } catch (ContentLibException e) {
             log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
-                    "PdfCreation: error while creating PDF file - for full details see the log file", "");
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
             return false;
         }
         // now split pdf
@@ -242,8 +241,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                         pdfFiles.add(pdfPath.toFile());
                     } catch (ContentLibException e) {
                         log.error(e);
-                        Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR,
-                                "PdfCreation: error while creating PDF file - for full details see the log file", "");
+                        Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
                         return false;
                     }
                 }
