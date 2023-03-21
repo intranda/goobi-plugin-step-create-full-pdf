@@ -115,7 +115,32 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     public PluginReturnValue run() {
 
         Process p = step.getProzess();
+        SubnodeConfiguration config = getConfig(p);
 
+        String imageFolder = config.getString("/imageFolder", "media");
+        boolean pagePdf = config.getBoolean("/pagePdf/@enabled");
+        boolean keepFullPdf = config.getBoolean("/fullPdf/@enabled");
+
+        try {
+            boolean ok = createPdfs(p, imageFolder, keepFullPdf, pagePdf);
+            if (!ok) {
+                return PluginReturnValue.ERROR;
+            }
+
+        } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
+            log.error(e);
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+            return PluginReturnValue.ERROR;
+        } catch (PDFWriteException | PDFReadException e) {
+            log.error(e);
+            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_SPLITING_MESSAGE, "");
+            return PluginReturnValue.ERROR;
+        }
+
+        return PluginReturnValue.FINISH;
+    }
+
+    private SubnodeConfiguration getConfig(Process p) {
         String projectName = p.getProjekt().getTitel();
         XMLConfiguration xmlConfig = ConfigPlugins.getPluginConfig(TITLE);
         xmlConfig.setExpressionEngine(new XPathExpressionEngine());
@@ -142,48 +167,32 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
         }
 
-        String imageFolder = config.getString("/imageFolder", "media");
-        boolean pagePdf = config.getBoolean("/pagePdf/@enabled");
-        boolean keepFullPdf = config.getBoolean("/fullPdf/@enabled");
-
-        try {
-            Path metsP = Paths.get(p.getMetadataFilePath());
-
-            Path pdfDir = Paths.get(p.getOcrPdfDirectory());
-            Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
-            Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
-            if (!Files.exists(pdfDir)) {
-                Files.createDirectories(pdfDir);
-            }
-            if (pagePdf) {
-                boolean ok = createPdfsSinglePageFirst(p, pdfDir, fullPdfFile, imageFolder, keepFullPdf);
-                if (!ok) {
-                    return PluginReturnValue.ERROR;
-                }
-            } else {
-                boolean ok = createPdfsFullPdfFirst(p, metsP, pdfDir, fullPdfDir, fullPdfFile, imageFolder, keepFullPdf);
-                if (!ok) {
-                    return PluginReturnValue.ERROR;
-                }
-            }
-        } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
-            log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
-            return PluginReturnValue.ERROR;
-        } catch (PDFWriteException | PDFReadException e) {
-            log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_SPLITING_MESSAGE, "");
-            return PluginReturnValue.ERROR;
-        }
-        return PluginReturnValue.FINISH;
+        return config;
     }
 
-    private boolean createPdfsFullPdfFirst(Process p, Path metsP, Path pdfDir, Path fullPdfDir, Path fullPdfFile, String folderName,
-            boolean keepFullPdf)
-                    throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
+    private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf)
+            throws SwapException, DAOException, IOException, InterruptedException, URISyntaxException, PDFWriteException, PDFReadException {
+
+        return pagePdf ? createPdfsSinglePageFirst(p, imageFolder, keepFullPdf) : createPdfsFullPdfFirst(p, imageFolder, keepFullPdf);
+    }
+
+    private boolean createPdfsFullPdfFirst(Process p, String folderName, boolean keepFullPdf)
+            throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
+
+        Path metsP = Paths.get(p.getMetadataFilePath());
+
+        Path pdfDir = Paths.get(p.getOcrPdfDirectory());
+        Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
+        Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
+
+        if (!Files.exists(pdfDir)) {
+            Files.createDirectories(pdfDir);
+        }
+
         if (!Files.exists(fullPdfDir)) {
             Files.createDirectories(fullPdfDir);
         }
+
         ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
         Map<String, String> parameters = new HashMap<>();
         MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
@@ -192,9 +201,10 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         if ("master".equals(folderName)) {
             req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
-        } else {
+        } else { // media
             req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
         }
+
         try (OutputStream os =
                 Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
             new GetMetsPdfAction().writePdf(req, csConfig, os);
@@ -204,24 +214,38 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
             return false;
         }
+
         // now split pdf
         splitPdf(pdfDir, fullPdfFile, p.getOcrAltoDirectory());
         if (!keepFullPdf) {
             FileUtils.deleteQuietly(fullPdfDir.toFile());
         }
+
         return true;
     }
 
-    private boolean createPdfsSinglePageFirst(Process p, Path pdfDir, Path fullPdfFile, String foldername, boolean keepFullPdf)
+    private boolean createPdfsSinglePageFirst(Process p, String foldername, boolean keepFullPdf)
             throws SwapException, DAOException, IOException, InterruptedException {
+
+        Path pdfDir = Paths.get(p.getOcrPdfDirectory());
+        Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
+        Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
+
+        if (!Files.exists(pdfDir)) {
+            Files.createDirectories(pdfDir);
+        }
+
         Path altoDir = Paths.get(p.getOcrAltoDirectory());
         Path sourceDir = null;
+
         if ("master".equals(foldername)) {
             sourceDir = Paths.get(p.getImagesOrigDirectory(false));
         } else {
             sourceDir = Paths.get(p.getImagesTifDirectory(false));
         }
+
         List<File> pdfFiles = new ArrayList<>();
+
         try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(sourceDir, NIOFileUtils.imageNameFilter)) {
             for (Path imageFile : dirStream) {
                 String imageFilename = imageFile.getFileName().toString();
@@ -247,35 +271,43 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 }
             }
         }
+
         if (keepFullPdf) {
             if (!Files.exists(fullPdfFile.getParent())) {
                 Files.createDirectories(fullPdfFile.getParent());
             }
+
             PDFMergerUtility pdfMerger = new PDFMergerUtility();
             Collections.sort(pdfFiles);
+
             for (File pdfFile : pdfFiles) {
                 pdfMerger.addSource(pdfFile);
             }
+
             try (OutputStream os =
                     Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
                 pdfMerger.setDestinationStream(os);
                 pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l));
             }
         }
+
         return true;
     }
 
     public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir) throws PDFWriteException, PDFReadException, IOException {
         List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
         String[] altoNames = new File(altoDir).list();
+
         if (altoNames != null) {
             Arrays.sort(altoNames);
         }
+
         Collections.sort(createdPdfs);
 
         for (int i = createdPdfs.size() - 1; i >= 0; i--) {
             File pdfFile = createdPdfs.get(i);
             Path newPath = null;
+
             if (altoNames != null && altoNames.length == createdPdfs.size()) {
                 String altoName = altoNames[i];
                 String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
@@ -283,6 +315,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             } else {
                 newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
             }
+
             Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
         }
     }
