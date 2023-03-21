@@ -60,6 +60,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private static final String ERROR_CREATING_MESSAGE = "PdfCreation: error while creating PDF file - for full details see the log file";
     private static final String ERROR_SPLITING_MESSAGE = "PdfCreation: error while splitting PDF file - for full details see the log file";
     private Step step;
+    private Path configuredPdfDir = null;
 
     @Override
     public void initialize(Step step, String returnPath) {
@@ -124,6 +125,11 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         boolean pagePdf = config.getBoolean("/pagePdf/@enabled");
         boolean keepFullPdf = config.getBoolean("/fullPdf/@enabled");
         String pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "");
+
+        String exportPath = config.getString("/exportPath", "");
+        if (StringUtils.isNotBlank(exportPath)) {
+            configuredPdfDir = Paths.get(exportPath);
+        }
 
         try {
             boolean ok = createPdfs(p, imageFolder, keepFullPdf, pagePdf, pdfConfigVariant);
@@ -190,7 +196,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         Path metsP = Paths.get(p.getMetadataFilePath());
 
-        Path pdfDir = Paths.get(p.getOcrPdfDirectory());
+        Path pdfDir = configuredPdfDir == null ? Paths.get(p.getOcrPdfDirectory()) : configuredPdfDir;
+
+        // modifications needed here 
         Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
         Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
 
@@ -239,7 +247,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private boolean createPdfsSinglePageFirst(Process p, String foldername, boolean keepFullPdf)
             throws SwapException, DAOException, IOException, InterruptedException {
 
-        Path pdfDir = Paths.get(p.getOcrPdfDirectory());
+        Path pdfDir = configuredPdfDir == null ? Paths.get(p.getOcrPdfDirectory()) : configuredPdfDir;
 
         if (!Files.exists(pdfDir)) {
             Files.createDirectories(pdfDir);
@@ -287,6 +295,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         // create a full page via merging if needed
         if (keepFullPdf) {
+            // modifications needed here 
             Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
             Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
 
