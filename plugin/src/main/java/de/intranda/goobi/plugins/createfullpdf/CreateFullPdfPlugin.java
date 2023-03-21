@@ -22,6 +22,7 @@ import org.apache.commons.configuration.XMLConfiguration;
 import org.apache.commons.configuration.reloading.FileChangedReloadingStrategy;
 import org.apache.commons.configuration.tree.xpath.XPathExpressionEngine;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.goobi.beans.Process;
@@ -114,15 +115,18 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     @Override
     public PluginReturnValue run() {
 
+        log.debug("================= STARTING CREATE-FULL-PDF PLUGIN =================");
+
         Process p = step.getProzess();
         SubnodeConfiguration config = getConfig(p);
 
         String imageFolder = config.getString("/imageFolder", "media");
         boolean pagePdf = config.getBoolean("/pagePdf/@enabled");
         boolean keepFullPdf = config.getBoolean("/fullPdf/@enabled");
+        String pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "");
 
         try {
-            boolean ok = createPdfs(p, imageFolder, keepFullPdf, pagePdf);
+            boolean ok = createPdfs(p, imageFolder, keepFullPdf, pagePdf, pdfConfigVariant);
             if (!ok) {
                 return PluginReturnValue.ERROR;
             }
@@ -170,13 +174,18 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return config;
     }
 
-    private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf)
+    private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException, URISyntaxException, PDFWriteException, PDFReadException {
 
-        return pagePdf ? createPdfsSinglePageFirst(p, imageFolder, keepFullPdf) : createPdfsFullPdfFirst(p, imageFolder, keepFullPdf);
+        log.debug("pdfConfigVariant = " + pdfConfigVariant);
+
+        boolean usePdfa = StringUtils.equalsIgnoreCase("pdfa", pdfConfigVariant);
+        boolean fullPageFirst = usePdfa || !pagePdf;
+
+        return fullPageFirst ? createPdfsFullPageFirst(p, imageFolder, keepFullPdf, usePdfa) : createPdfsSinglePageFirst(p, imageFolder, keepFullPdf);
     }
 
-    private boolean createPdfsFullPdfFirst(Process p, String folderName, boolean keepFullPdf)
+    private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, boolean usePdfa)
             throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
 
         Path metsP = Paths.get(p.getMetadataFilePath());
@@ -196,6 +205,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
         Map<String, String> parameters = new HashMap<>();
         MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
+
+        // use PDF/A if so configured
+        req.setWriteAsPdfA(usePdfa);
 
         req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
 
@@ -238,7 +250,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         if ("master".equals(foldername)) {
             sourceDir = Paths.get(p.getImagesOrigDirectory(false));
-        } else {
+        } else { // use media otherwise
             sourceDir = Paths.get(p.getImagesTifDirectory(false));
         }
 
@@ -273,6 +285,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             }
         }
 
+        // create a full page via merging if needed
         if (keepFullPdf) {
             Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
             Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
