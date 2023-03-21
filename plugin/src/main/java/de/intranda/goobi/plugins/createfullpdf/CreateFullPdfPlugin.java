@@ -228,8 +228,6 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             throws SwapException, DAOException, IOException, InterruptedException {
 
         Path pdfDir = Paths.get(p.getOcrPdfDirectory());
-        Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
-        Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
 
         if (!Files.exists(pdfDir)) {
             Files.createDirectories(pdfDir);
@@ -252,29 +250,35 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 int lastDotIdx = imageFilename.lastIndexOf('.');
                 String pdfFilename = imageFilename.substring(0, lastDotIdx) + ".pdf";
                 String altoFilename = imageFilename.substring(0, lastDotIdx) + ".xml";
+
                 Path pdfPath = pdfDir.resolve(pdfFilename);
                 try (OutputStream os = Files.newOutputStream(pdfPath)) {
-                    try {
-                        Map<String, String> singlePdfParameters = new HashMap<>();
-                        singlePdfParameters.put("images", imageFile.toUri().toString());
-                        Path altoPath = altoDir.resolve(altoFilename);
-                        if (Files.exists(altoPath)) {
-                            singlePdfParameters.put("altos", altoPath.toUri().toString());
-                        }
-                        new GetPdfAction().writePdf(singlePdfParameters, os);
-                        pdfFiles.add(pdfPath.toFile());
-                    } catch (ContentLibException e) {
-                        log.error(e);
-                        Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
-                        return false;
+                    Map<String, String> singlePdfParameters = new HashMap<>();
+
+                    singlePdfParameters.put("images", imageFile.toUri().toString());
+
+                    Path altoPath = altoDir.resolve(altoFilename);
+                    if (Files.exists(altoPath)) {
+                        singlePdfParameters.put("altos", altoPath.toUri().toString());
                     }
+
+                    new GetPdfAction().writePdf(singlePdfParameters, os);
+                    pdfFiles.add(pdfPath.toFile());
+
+                } catch (ContentLibException e) {
+                    log.error(e);
+                    Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+                    return false;
                 }
             }
         }
 
         if (keepFullPdf) {
-            if (!Files.exists(fullPdfFile.getParent())) {
-                Files.createDirectories(fullPdfFile.getParent());
+            Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
+            Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
+
+            if (!Files.exists(fullPdfDir)) {
+                Files.createDirectories(fullPdfDir);
             }
 
             PDFMergerUtility pdfMerger = new PDFMergerUtility();
