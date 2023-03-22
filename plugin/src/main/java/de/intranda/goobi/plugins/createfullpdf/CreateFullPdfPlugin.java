@@ -157,6 +157,12 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return PluginReturnValue.FINISH;
     }
 
+    /**
+     * get the SubnodeConfiguration object
+     * 
+     * @param p Goobi process
+     * @return config for the given process
+     */
     private SubnodeConfiguration getConfig(Process p) {
         String projectName = p.getProjekt().getTitel();
         XMLConfiguration xmlConfig = ConfigPlugins.getPluginConfig(TITLE);
@@ -187,6 +193,23 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return config;
     }
 
+    /**
+     * used to control the order of generating PDF files
+     * 
+     * @param p Goobi process
+     * @param imageFolder name of the image folder, either "master" or "media"
+     * @param keepFullPdf if true then a full PDF file will be generated, false otherwise
+     * @param pagePdf if true then single pages will be generated first before the full PDF file, false otherwise
+     * @param pdfConfigVariant name of the config variant that shall be used
+     * @return true if the PDF files are created successfully, false otherwise
+     * @throws SwapException
+     * @throws DAOException
+     * @throws IOException
+     * @throws InterruptedException
+     * @throws URISyntaxException
+     * @throws PDFWriteException
+     * @throws PDFReadException
+     */
     private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException, URISyntaxException, PDFWriteException, PDFReadException {
 
@@ -201,10 +224,27 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 : createPdfsFullPageFirst(p, imageFolder, keepFullPdf, pdfConfigVariant);
     }
 
+    /**
+     * create a full PDF page first, then create single pages
+     * 
+     * @param p Goobi process
+     * @param folderName name of the image folder, either "master" or "media"
+     * @param keepFullPdf if true then a full PDF file will be generated in the beginning, false otherwise
+     * @param pdfConfigVariant name of the config variant that shall be used
+     * @return true if the creation of files is successful, false otherwise
+     * @throws URISyntaxException
+     * @throws SwapException
+     * @throws DAOException
+     * @throws IOException
+     * @throws InterruptedException
+     * @throws PDFWriteException
+     * @throws PDFReadException
+     */
     private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
             throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
 
-        boolean fullPageCreated = createFullPage(p, folderName, keepFullPdf, pdfConfigVariant);
+        // call the method createFullPage only when keepFullPdf is true
+        boolean fullPageCreated = !keepFullPdf || createFullPage(p, folderName, pdfConfigVariant);
         if (!fullPageCreated) {
             log.error("Errors happened while trying to create the full page.");
             return false;
@@ -219,6 +259,19 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return true;
     }
 
+    /**
+     * create single pages first, and then merge them into a full PDF file
+     * 
+     * @param p Goobi process
+     * @param folderName name of the image folder, either "master" or "media"
+     * @param keepFullPdf if true then a full PDF file will be generated in the end, false otherwise
+     * @param pdfConfigVariant name of the config variant that shall be used
+     * @return true if the creation of files is successful, false otherwise
+     * @throws SwapException
+     * @throws DAOException
+     * @throws IOException
+     * @throws InterruptedException
+     */
     private boolean createPdfsSinglePageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException {
 
@@ -242,7 +295,22 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return true;
     }
 
-    private boolean createFullPage(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
+    /**
+     * create a full PDF file
+     * 
+     * @param p Goobi process
+     * @param folderName name of the image folder, either "master" or "media"
+     * @param pdfConfigVariant name of the config variant that shall be used
+     * @return true if the full PDF file is successfully generated, false otherwise
+     * @throws URISyntaxException
+     * @throws SwapException
+     * @throws DAOException
+     * @throws IOException
+     * @throws InterruptedException
+     * @throws PDFWriteException
+     * @throws PDFReadException
+     */
+    private boolean createFullPage(Process p, String folderName, String pdfConfigVariant)
             throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
 
         Path metsP = Paths.get(p.getMetadataFilePath());
@@ -291,7 +359,19 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     }
 
 
-    private List<File> createSinglePages(Process p, String foldername, String pdfConfigVariant)
+    /**
+     * create single pages
+     * 
+     * @param p Goobi process
+     * @param folderName name of the image folder, either "master" or "media"
+     * @param pdfConfigVariant name of the config variant that shall be used
+     * @return the list of all generated single pages if successful, null otherwise
+     * @throws SwapException
+     * @throws DAOException
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    private List<File> createSinglePages(Process p, String folderName, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException {
 
         Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
@@ -303,7 +383,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         Path altoDir = Paths.get(p.getOcrAltoDirectory());
         Path sourceDir = null;
 
-        if ("master".equals(foldername)) {
+        if ("master".equals(folderName)) {
             sourceDir = Paths.get(p.getImagesOrigDirectory(false));
         } else { // use media otherwise
             sourceDir = Paths.get(p.getImagesTifDirectory(false));
@@ -346,6 +426,13 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return pdfFiles;
     }
 
+    /**
+     * merge a list of pages into a whole PDF file
+     * 
+     * @param p Goobi process
+     * @param pdfFiles the list of single pages that shall be merged
+     * @throws IOException
+     */
     private void mergePages(Process p, List<File> pdfFiles) throws IOException {
         Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
         Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
@@ -368,6 +455,16 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         }
     }
 
+    /**
+     * was used to generate single pages via splitting the full PDF file, but it doesn't work correctly with PDF/A file
+     * 
+     * @param pdfDir Path of the PDF directory
+     * @param fullPdfFile Path to the full PDF file
+     * @param altoDir Path of the ALTO directory as String
+     * @throws PDFWriteException
+     * @throws PDFReadException
+     * @throws IOException
+     */
     public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir) throws PDFWriteException, PDFReadException, IOException {
         List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
         String[] altoNames = new File(altoDir).list();
