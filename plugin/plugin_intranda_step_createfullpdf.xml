@@ -20,7 +20,12 @@
         <pagePdf enabled="true" /> 
 
         <!-- If enabled, a PDF file for the entire record is generated. This file includes the table of contents from the METS file if exists. -->
-        <fullPdf enabled="true" />
+        <!-- The attribute pdfConfigVariant sets up which config variant in contentServerConfig.xml should be used. If not set, then use default. -->
+        <fullPdf enabled="true" pdfConfigVariant="pdfa"/>
+        
+        <!-- If set, then the path will be used to export the results. Otherwise the default settings will be used. -->
+        <!-- Here is an ABSOLUTE path expected. -->
+        <exportPath>/tmp/export</exportPath>
     </config>
     
     <config>
