@@ -59,7 +59,6 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     private static final String TITLE = "intranda_step_createfullpdf";
     private static final String ERROR_CREATING_MESSAGE = "PdfCreation: error while creating PDF file - for full details see the log file";
-    private static final String ERROR_SPLITING_MESSAGE = "PdfCreation: error while splitting PDF file - for full details see the log file";
     private Step step;
 
     private Path exportDirectory = null;
@@ -144,13 +143,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 return PluginReturnValue.ERROR;
             }
 
-        } catch (URISyntaxException | IOException | InterruptedException | SwapException | DAOException e) {
+        } catch (URISyntaxException | IOException | SwapException | DAOException e) {
             log.error(e);
             Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
-            return PluginReturnValue.ERROR;
-        } catch (PDFWriteException | PDFReadException e) {
-            log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_SPLITING_MESSAGE, "");
             return PluginReturnValue.ERROR;
         }
 
@@ -205,13 +200,10 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
      * @throws SwapException
      * @throws DAOException
      * @throws IOException
-     * @throws InterruptedException
      * @throws URISyntaxException
-     * @throws PDFWriteException
-     * @throws PDFReadException
      */
     private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf, String pdfConfigVariant)
-            throws SwapException, DAOException, IOException, InterruptedException, URISyntaxException, PDFWriteException, PDFReadException {
+            throws SwapException, DAOException, IOException, URISyntaxException {
 
         // use default ocr directory for export if not configured
         if (exportDirectory == null) {
@@ -236,12 +228,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
      * @throws SwapException
      * @throws DAOException
      * @throws IOException
-     * @throws InterruptedException
-     * @throws PDFWriteException
-     * @throws PDFReadException
      */
     private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
-            throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
+            throws URISyntaxException, SwapException, DAOException, IOException {
 
         // call the method createFullPage only when keepFullPdf is true
         boolean fullPageCreated = !keepFullPdf || createFullPage(p, folderName, pdfConfigVariant);
@@ -270,10 +259,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
      * @throws SwapException
      * @throws DAOException
      * @throws IOException
-     * @throws InterruptedException
      */
     private boolean createPdfsSinglePageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
-            throws SwapException, DAOException, IOException, InterruptedException {
+            throws SwapException, DAOException, IOException {
 
         List<File> pdfFiles = createSinglePages(p, folderName, pdfConfigVariant);
         if (pdfFiles == null) {
@@ -302,16 +290,13 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
      * @param folderName name of the image folder, either "master" or "media"
      * @param pdfConfigVariant name of the config variant that shall be used
      * @return true if the full PDF file is successfully generated, false otherwise
-     * @throws URISyntaxException
-     * @throws SwapException
-     * @throws DAOException
      * @throws IOException
-     * @throws InterruptedException
-     * @throws PDFWriteException
-     * @throws PDFReadException
+     * @throws SwapException
+     * @throws URISyntaxException
+     * @throws DAOException
      */
     private boolean createFullPage(Process p, String folderName, String pdfConfigVariant)
-            throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
+            throws IOException, SwapException, URISyntaxException, DAOException {
 
         Path metsP = Paths.get(p.getMetadataFilePath());
 
@@ -369,10 +354,8 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
      * @throws SwapException
      * @throws DAOException
      * @throws IOException
-     * @throws InterruptedException
      */
-    private List<File> createSinglePages(Process p, String folderName, String pdfConfigVariant)
-            throws SwapException, DAOException, IOException, InterruptedException {
+    private List<File> createSinglePages(Process p, String folderName, String pdfConfigVariant) throws IOException, SwapException, DAOException {
 
         Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
 
