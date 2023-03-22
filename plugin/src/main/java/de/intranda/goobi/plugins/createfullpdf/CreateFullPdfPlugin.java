@@ -21,7 +21,6 @@ import org.apache.commons.configuration.SubnodeConfiguration;
 import org.apache.commons.configuration.XMLConfiguration;
 import org.apache.commons.configuration.reloading.FileChangedReloadingStrategy;
 import org.apache.commons.configuration.tree.xpath.XPathExpressionEngine;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
@@ -205,6 +204,47 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
             throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
 
+        boolean fullPageCreated = createFullPage(p, folderName, keepFullPdf, pdfConfigVariant);
+        if (!fullPageCreated) {
+            log.error("Errors happened while trying to create the full page.");
+            return false;
+        }
+
+        List<File> singlePages = createSinglePages(p, folderName, pdfConfigVariant);
+        if (singlePages == null) {
+            log.error("Errors happened while trying to create single pages.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean createPdfsSinglePageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
+            throws SwapException, DAOException, IOException, InterruptedException {
+
+        List<File> pdfFiles = createSinglePages(p, folderName, pdfConfigVariant);
+        if (pdfFiles == null) {
+            log.error("Errors happened while trying to create single pages.");
+            return false;
+        }
+
+        // create a full page via merging if needed
+        if (keepFullPdf) {
+            try {
+                mergePages(p, pdfFiles);
+
+            } catch (IOException e) {
+                log.error("IOException happened while trying to merge single pages into a full page.");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private boolean createFullPage(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
+            throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
+
         Path metsP = Paths.get(p.getMetadataFilePath());
 
         Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
@@ -222,11 +262,11 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
         Map<String, String> parameters = new HashMap<>();
-        // set the configured variant as value of the key "config"
+        // set the configured variant as value of the key "config" to use this config
         // if the variant is not configured in Goobi/src/main/resources/contentServerConfig.xml, then default settings will be used
         parameters.put("config", pdfConfigVariant);
         MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
-        
+
         log.debug("req.isWriteAsPdfa = " + req.isWriteAsPdfA());
 
         req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
@@ -247,16 +287,11 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
             return false;
         }
 
-        // now split pdf
-        splitPdf(pdfDir, fullPdfFile, p.getOcrAltoDirectory());
-        if (!keepFullPdf) {
-            FileUtils.deleteQuietly(fullPdfDir.toFile());
-        }
-
         return true;
     }
 
-    private boolean createPdfsSinglePageFirst(Process p, String foldername, boolean keepFullPdf, String pdfConfigVariant)
+
+    private List<File> createSinglePages(Process p, String foldername, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException {
 
         Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
@@ -287,6 +322,9 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 try (OutputStream os = Files.newOutputStream(pdfPath)) {
                     Map<String, String> singlePdfParameters = new HashMap<>();
 
+                    // set the configured variant as value of the key "config" to use this config
+                    singlePdfParameters.put("config", pdfConfigVariant);
+
                     singlePdfParameters.put("images", imageFile.toUri().toString());
 
                     Path altoPath = altoDir.resolve(altoFilename);
@@ -300,35 +338,34 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 } catch (ContentLibException e) {
                     log.error(e);
                     Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
-                    return false;
+                    return null;
                 }
             }
         }
 
-        // create a full page via merging if needed
-        if (keepFullPdf) {
-            Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
-            Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
+        return pdfFiles;
+    }
 
-            if (!Files.exists(fullPdfDir)) {
-                Files.createDirectories(fullPdfDir);
-            }
+    private void mergePages(Process p, List<File> pdfFiles) throws IOException {
+        Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
+        Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
 
-            PDFMergerUtility pdfMerger = new PDFMergerUtility();
-            Collections.sort(pdfFiles);
-
-            for (File pdfFile : pdfFiles) {
-                pdfMerger.addSource(pdfFile);
-            }
-
-            try (OutputStream os =
-                    Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
-                pdfMerger.setDestinationStream(os);
-                pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l));
-            }
+        if (!Files.exists(fullPdfDir)) {
+            Files.createDirectories(fullPdfDir);
         }
 
-        return true;
+        PDFMergerUtility pdfMerger = new PDFMergerUtility();
+        Collections.sort(pdfFiles);
+
+        for (File pdfFile : pdfFiles) {
+            pdfMerger.addSource(pdfFile);
+        }
+
+        try (OutputStream os =
+                Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
+            pdfMerger.setDestinationStream(os);
+            pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l));
+        }
     }
 
     public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir) throws PDFWriteException, PDFReadException, IOException {
