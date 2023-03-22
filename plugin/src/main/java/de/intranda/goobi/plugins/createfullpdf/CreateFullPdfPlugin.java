@@ -39,8 +39,10 @@ import de.intranda.digiverso.pdf.PDFConverter;
 import de.intranda.digiverso.pdf.exception.PDFReadException;
 import de.intranda.digiverso.pdf.exception.PDFWriteException;
 import de.sub.goobi.config.ConfigPlugins;
+import de.sub.goobi.config.ConfigurationHelper;
 import de.sub.goobi.helper.Helper;
 import de.sub.goobi.helper.NIOFileUtils;
+import de.sub.goobi.helper.VariableReplacer;
 import de.sub.goobi.helper.exceptions.DAOException;
 import de.sub.goobi.helper.exceptions.SwapException;
 import de.unigoettingen.sub.commons.contentlib.exceptions.ContentLibException;
@@ -60,7 +62,10 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private static final String ERROR_CREATING_MESSAGE = "PdfCreation: error while creating PDF file - for full details see the log file";
     private static final String ERROR_SPLITING_MESSAGE = "PdfCreation: error while splitting PDF file - for full details see the log file";
     private Step step;
-    private Path configuredPdfDir = null;
+
+    private Path exportDirectory = null;
+
+    private String processOcrPdfDirectoryName;
 
     @Override
     public void initialize(Step step, String returnPath) {
@@ -124,12 +129,15 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         String imageFolder = config.getString("/imageFolder", "media");
         boolean pagePdf = config.getBoolean("/pagePdf/@enabled");
         boolean keepFullPdf = config.getBoolean("/fullPdf/@enabled");
-        String pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "");
+        String pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "default");
 
         String exportPath = config.getString("/exportPath", "");
         if (StringUtils.isNotBlank(exportPath)) {
-            configuredPdfDir = Paths.get(exportPath);
+            exportDirectory = Paths.get(exportPath);
         }
+
+        processOcrPdfDirectoryName = VariableReplacer.simpleReplace(ConfigurationHelper.getInstance().getProcessOcrPdfDirectoryName(), p);
+        log.debug("processOcrPdfDirectoryName = " + processOcrPdfDirectoryName);
 
         try {
             boolean ok = createPdfs(p, imageFolder, keepFullPdf, pagePdf, pdfConfigVariant);
@@ -183,23 +191,25 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException, URISyntaxException, PDFWriteException, PDFReadException {
 
-        log.debug("pdfConfigVariant = " + pdfConfigVariant);
+        // use default ocr directory for export if not configured
+        if (exportDirectory == null) {
+            exportDirectory = Paths.get(p.getOcrDirectory());
+        }
 
-        boolean usePdfa = StringUtils.equalsIgnoreCase("pdfa", pdfConfigVariant);
-        boolean fullPageFirst = usePdfa || !pagePdf;
+        log.debug("exportDirectory = " + exportDirectory);
 
-        return fullPageFirst ? createPdfsFullPageFirst(p, imageFolder, keepFullPdf, usePdfa) : createPdfsSinglePageFirst(p, imageFolder, keepFullPdf);
+        return pagePdf ? createPdfsSinglePageFirst(p, imageFolder, keepFullPdf, pdfConfigVariant)
+                : createPdfsFullPageFirst(p, imageFolder, keepFullPdf, pdfConfigVariant);
     }
 
-    private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, boolean usePdfa)
+    private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
             throws URISyntaxException, SwapException, DAOException, IOException, InterruptedException, PDFWriteException, PDFReadException {
 
         Path metsP = Paths.get(p.getMetadataFilePath());
 
-        Path pdfDir = configuredPdfDir == null ? Paths.get(p.getOcrPdfDirectory()) : configuredPdfDir;
+        Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
 
-        // modifications needed here 
-        Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
+        Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
         Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
 
         if (!Files.exists(pdfDir)) {
@@ -212,10 +222,12 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
         Map<String, String> parameters = new HashMap<>();
+        // set the configured variant as value of the key "config"
+        // if the variant is not configured in Goobi/src/main/resources/contentServerConfig.xml, then default settings will be used
+        parameters.put("config", pdfConfigVariant);
         MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
-
-        // use PDF/A if so configured
-        req.setWriteAsPdfA(usePdfa);
+        
+        log.debug("req.isWriteAsPdfa = " + req.isWriteAsPdfA());
 
         req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
 
@@ -244,10 +256,10 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return true;
     }
 
-    private boolean createPdfsSinglePageFirst(Process p, String foldername, boolean keepFullPdf)
+    private boolean createPdfsSinglePageFirst(Process p, String foldername, boolean keepFullPdf, String pdfConfigVariant)
             throws SwapException, DAOException, IOException, InterruptedException {
 
-        Path pdfDir = configuredPdfDir == null ? Paths.get(p.getOcrPdfDirectory()) : configuredPdfDir;
+        Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
 
         if (!Files.exists(pdfDir)) {
             Files.createDirectories(pdfDir);
@@ -295,8 +307,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         // create a full page via merging if needed
         if (keepFullPdf) {
-            // modifications needed here 
-            Path fullPdfDir = Paths.get(p.getOcrDirectory()).resolve(p.getTitel() + "_fullpdf");
+            Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
             Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
 
             if (!Files.exists(fullPdfDir)) {
