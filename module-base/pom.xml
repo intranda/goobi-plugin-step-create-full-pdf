@@ -2,9 +2,9 @@
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>io.goobi.workflow.plugin</groupId>
-    <artifactId>plugin-step-createfullpdf</artifactId>
+    <artifactId>plugin-step-create-full-pdf</artifactId>
     <version>24.03-SNAPSHOT</version>
   </parent>
-  <artifactId>plugin-step-createfullpdf-base</artifactId>
+  <artifactId>plugin-step-create-full-pdf-base</artifactId>
   <packaging>jar</packaging>
 </project>
