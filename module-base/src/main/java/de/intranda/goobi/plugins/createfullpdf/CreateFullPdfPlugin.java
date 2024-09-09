@@ -343,7 +343,6 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return true;
     }
 
-
     /**
      * create single pages
      * 
@@ -434,7 +433,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         try (OutputStream os =
                 Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
             pdfMerger.setDestinationStream(os);
-            pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l));
+            pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l).streamCache);
         }
     }
 
