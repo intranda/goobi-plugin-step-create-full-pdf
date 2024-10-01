@@ -8,21 +8,15 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.configuration.SubnodeConfiguration;
-import org.apache.commons.configuration.XMLConfiguration;
-import org.apache.commons.configuration.reloading.FileChangedReloadingStrategy;
-import org.apache.commons.configuration.tree.xpath.XPathExpressionEngine;
 import org.apache.commons.lang.StringUtils;
-import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.goobi.beans.Process;
 import org.goobi.beans.Step;
@@ -34,13 +28,11 @@ import org.goobi.production.enums.PluginType;
 import org.goobi.production.enums.StepReturnValue;
 import org.goobi.production.plugin.interfaces.IStepPluginVersion2;
 
-import de.intranda.digiverso.pdf.PDFConverter;
-import de.intranda.digiverso.pdf.exception.PDFReadException;
-import de.intranda.digiverso.pdf.exception.PDFWriteException;
 import de.sub.goobi.config.ConfigPlugins;
 import de.sub.goobi.config.ConfigurationHelper;
 import de.sub.goobi.helper.Helper;
 import de.sub.goobi.helper.NIOFileUtils;
+import de.sub.goobi.helper.StorageProvider;
 import de.sub.goobi.helper.VariableReplacer;
 import de.sub.goobi.helper.exceptions.DAOException;
 import de.sub.goobi.helper.exceptions.SwapException;
@@ -48,6 +40,7 @@ import de.unigoettingen.sub.commons.contentlib.exceptions.ContentLibException;
 import de.unigoettingen.sub.commons.contentlib.servlet.controller.GetPdfAction;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.ContentServerConfiguration;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.MetsPdfRequest;
+import lombok.Getter;
 import lombok.extern.log4j.Log4j;
 import net.xeoh.plugins.base.annotations.PluginImplementation;
 
@@ -57,13 +50,20 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
     private static final long serialVersionUID = -5076430372560062201L;
 
-    private static final String TITLE = "intranda_step_createfullpdf";
-    private static final String ERROR_CREATING_MESSAGE = "PdfCreation: error while creating PDF file - for full details see the log file";
+    @Getter
+    private String title = "intranda_step_createfullpdf";
+    private static final String ERROR_CREATING_MESSAGE = "PDF-Creation: Error while creating PDF file - for full details see the log file";
     private Step step;
+    private Process process;
 
     private Path exportDirectory = null;
-
     private String processOcrPdfDirectoryName;
+
+    private String imageFolder;
+    private boolean singlePagePdf;
+    private boolean fullPdf;
+    private String fullPdfMode;
+    private String pdfConfigVariant;
 
     @Override
     public void initialize(Step step, String returnPath) {
@@ -112,40 +112,89 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     }
 
     @Override
-    public String getTitle() {
-        return TITLE;
-    }
-
-    @Override
     public PluginReturnValue run() {
 
         log.debug("================= STARTING CREATE-FULL-PDF PLUGIN =================");
 
-        Process p = step.getProzess();
-        SubnodeConfiguration config = getConfig(p);
+        process = step.getProzess();
+        SubnodeConfiguration config = ConfigPlugins.getProjectAndStepConfig(title, step);
 
-        String imageFolder = config.getString("/imageFolder", "media");
-        boolean pagePdf = config.getBoolean("/pagePdf/@enabled");
-        boolean keepFullPdf = config.getBoolean("/fullPdf/@enabled");
-        String pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "default");
-
-        String exportPath = config.getString("/exportPath", "");
-        if (StringUtils.isNotBlank(exportPath)) {
-            exportDirectory = Paths.get(exportPath);
-        }
-
-        processOcrPdfDirectoryName = VariableReplacer.simpleReplace(ConfigurationHelper.getInstance().getProcessOcrPdfDirectoryName(), p);
-        log.debug("processOcrPdfDirectoryName = " + processOcrPdfDirectoryName);
+        imageFolder = config.getString("/imageFolder", "media");
+        singlePagePdf = config.getBoolean("/singlePagePdf/@enabled", false);
+        fullPdf = config.getBoolean("/fullPdf/@enabled", false);
+        fullPdfMode = config.getString("/fullPdf/@mode", "mets").toLowerCase();
+        pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "default");
 
         try {
-            boolean ok = createPdfs(p, imageFolder, keepFullPdf, pagePdf, pdfConfigVariant);
-            if (!ok) {
-                return PluginReturnValue.ERROR;
+
+            // create export path
+            String exportPath = config.getString("/exportPath", "");
+            if (StringUtils.isNotBlank(exportPath)) {
+                exportDirectory = Paths.get(exportPath);
+            } else {
+                // use default ocr directory for export if not configured
+                exportDirectory = Paths.get(process.getOcrDirectory());
+            }
+            log.debug("exportDirectory = " + exportDirectory);
+
+            // read potential source folder for source pdf files
+            processOcrPdfDirectoryName = VariableReplacer.simpleReplace(ConfigurationHelper.getInstance().getProcessOcrPdfDirectoryName(), process);
+            log.debug("processOcrPdfDirectoryName = " + processOcrPdfDirectoryName);
+
+            // full PDF file from mets
+            if (fullPdf && "mets".equals(fullPdfMode)) {
+                // prepare the target pdf folder
+                Path fullPdfFolder = exportDirectory.resolve(process.getTitel() + "_fullpdf");
+                if (!Files.exists(fullPdfFolder)) {
+                    Files.createDirectories(fullPdfFolder);
+                }
+                // do pdf generation
+                boolean ok = createFullPdfFromMets(fullPdfFolder);
+                if (!ok) {
+                    log.error("An error happened while trying to create full PDF based on METS file.");
+                    Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR,
+                            "An error happened while trying to create full PDF based on METS file.");
+                    return PluginReturnValue.ERROR;
+                }
+            }
+
+            // Single Page PDFs: if single PDF pages are requested OR a full PDF file from single pages
+            List<File> singlePagePdfFiles = new ArrayList<File>();
+            Path singlePagePdfFolder = exportDirectory.resolve(processOcrPdfDirectoryName);
+            if (singlePagePdf || (fullPdf && !"mets".equals(fullPdfMode))) {
+                // prepare the target pdf folder
+                if (!Files.exists(singlePagePdfFolder)) {
+                    Files.createDirectories(singlePagePdfFolder);
+                }
+                // do the pdf generation
+                singlePagePdfFiles = createSinglePagePdfs(singlePagePdfFolder);
+                if (singlePagePdfFiles == null) {
+                    log.error("An error happened while trying to create single page PDF files.");
+                    Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR,
+                            "An error happened while trying to create single page PDF files.");
+                    return PluginReturnValue.ERROR;
+                }
+            }
+
+            // full pdf file from single pages
+            if (fullPdf && !"mets".equals(fullPdfMode)) {
+                // prepare the target pdf folder
+                Path fullPdfFolder = exportDirectory.resolve(process.getTitel() + "_fullpdf");
+                if (!Files.exists(fullPdfFolder)) {
+                    Files.createDirectories(fullPdfFolder);
+                }
+                // do pdf generation based on single page pdfs
+                createFullPdfFromSinglePagePdfs(singlePagePdfFiles, fullPdfFolder);
+            }
+
+            // clean up single page PDF folder if just needed for full pdf generation
+            if (!singlePagePdf && (fullPdf && !"mets".equals(fullPdfMode))) {
+                StorageProvider.getInstance().deleteDir(singlePagePdfFolder);
             }
 
         } catch (URISyntaxException | IOException | SwapException | DAOException e) {
             log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+            Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
             return PluginReturnValue.ERROR;
         }
 
@@ -153,222 +202,22 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     }
 
     /**
-     * get the SubnodeConfiguration object
-     * 
-     * @param p Goobi process
-     * @return config for the given process
-     */
-    private SubnodeConfiguration getConfig(Process p) {
-        String projectName = p.getProjekt().getTitel();
-        XMLConfiguration xmlConfig = ConfigPlugins.getPluginConfig(TITLE);
-        xmlConfig.setExpressionEngine(new XPathExpressionEngine());
-        xmlConfig.setReloadingStrategy(new FileChangedReloadingStrategy());
-
-        SubnodeConfiguration config = null;
-
-        // order of configuration is:
-        // 1.) project name and step name matches
-        // 2.) step name matches and project is *
-        // 3.) project name matches and step name is *
-        // 4.) project name and step name are *
-        try {
-            config = xmlConfig.configurationAt("//config[./project = '" + projectName + "'][./step = '" + step.getTitel() + "']");
-        } catch (IllegalArgumentException e) {
-            try {
-                config = xmlConfig.configurationAt("//config[./project = '*'][./step = '" + step.getTitel() + "']");
-            } catch (IllegalArgumentException e1) {
-                try {
-                    config = xmlConfig.configurationAt("//config[./project = '" + projectName + "'][./step = '*']");
-                } catch (IllegalArgumentException e2) {
-                    config = xmlConfig.configurationAt("//config[./project = '*'][./step = '*']");
-                }
-            }
-        }
-
-        return config;
-    }
-
-    /**
-     * used to control the order of generating PDF files
-     * 
-     * @param p Goobi process
-     * @param imageFolder name of the image folder, either "master" or "media"
-     * @param keepFullPdf if true then a full PDF file will be generated, false otherwise
-     * @param pagePdf if true then single pages will be generated first before the full PDF file, false otherwise
-     * @param pdfConfigVariant name of the config variant that shall be used
-     * @return true if the PDF files are created successfully, false otherwise
-     * @throws SwapException
-     * @throws DAOException
-     * @throws IOException
-     * @throws URISyntaxException
-     */
-    private boolean createPdfs(Process p, String imageFolder, boolean keepFullPdf, boolean pagePdf, String pdfConfigVariant)
-            throws SwapException, DAOException, IOException, URISyntaxException {
-
-        // use default ocr directory for export if not configured
-        if (exportDirectory == null) {
-            exportDirectory = Paths.get(p.getOcrDirectory());
-        }
-
-        log.debug("exportDirectory = " + exportDirectory);
-
-        return pagePdf ? createPdfsSinglePageFirst(p, imageFolder, keepFullPdf, pdfConfigVariant)
-                : createPdfsFullPageFirst(p, imageFolder, keepFullPdf, pdfConfigVariant);
-    }
-
-    /**
-     * create a full PDF page first, then create single pages
-     * 
-     * @param p Goobi process
-     * @param folderName name of the image folder, either "master" or "media"
-     * @param keepFullPdf if true then a full PDF file will be generated in the beginning, false otherwise
-     * @param pdfConfigVariant name of the config variant that shall be used
-     * @return true if the creation of files is successful, false otherwise
-     * @throws URISyntaxException
-     * @throws SwapException
-     * @throws DAOException
-     * @throws IOException
-     */
-    private boolean createPdfsFullPageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
-            throws URISyntaxException, SwapException, DAOException, IOException {
-
-        // call the method createFullPage only when keepFullPdf is true
-        boolean fullPageCreated = !keepFullPdf || createFullPage(p, folderName, pdfConfigVariant);
-        if (!fullPageCreated) {
-            log.error("Errors happened while trying to create the full page.");
-            return false;
-        }
-
-        List<File> singlePages = createSinglePages(p, folderName, pdfConfigVariant);
-        if (singlePages == null) {
-            log.error("Errors happened while trying to create single pages.");
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * create single pages first, and then merge them into a full PDF file
-     * 
-     * @param p Goobi process
-     * @param folderName name of the image folder, either "master" or "media"
-     * @param keepFullPdf if true then a full PDF file will be generated in the end, false otherwise
-     * @param pdfConfigVariant name of the config variant that shall be used
-     * @return true if the creation of files is successful, false otherwise
-     * @throws SwapException
-     * @throws DAOException
-     * @throws IOException
-     */
-    private boolean createPdfsSinglePageFirst(Process p, String folderName, boolean keepFullPdf, String pdfConfigVariant)
-            throws SwapException, DAOException, IOException {
-
-        List<File> pdfFiles = createSinglePages(p, folderName, pdfConfigVariant);
-        if (pdfFiles == null) {
-            log.error("Errors happened while trying to create single pages.");
-            return false;
-        }
-
-        // create a full page via merging if needed
-        if (keepFullPdf) {
-            try {
-                mergePages(p, pdfFiles);
-
-            } catch (IOException e) {
-                log.error("IOException happened while trying to merge single pages into a full page.");
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * create a full PDF file
-     * 
-     * @param p Goobi process
-     * @param folderName name of the image folder, either "master" or "media"
-     * @param pdfConfigVariant name of the config variant that shall be used
-     * @return true if the full PDF file is successfully generated, false otherwise
-     * @throws IOException
-     * @throws SwapException
-     * @throws URISyntaxException
-     * @throws DAOException
-     */
-    private boolean createFullPage(Process p, String folderName, String pdfConfigVariant)
-            throws IOException, SwapException, URISyntaxException, DAOException {
-
-        Path metsP = Paths.get(p.getMetadataFilePath());
-
-        Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
-
-        Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
-        Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
-
-        if (!Files.exists(pdfDir)) {
-            Files.createDirectories(pdfDir);
-        }
-
-        if (!Files.exists(fullPdfDir)) {
-            Files.createDirectories(fullPdfDir);
-        }
-
-        ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
-        Map<String, String> parameters = new HashMap<>();
-        // set the configured variant as value of the key "config" to use this config
-        // if the variant is not configured in Goobi/src/main/resources/contentServerConfig.xml, then default settings will be used
-        parameters.put("config", pdfConfigVariant);
-        MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
-
-        log.debug("req.isWriteAsPdfa = " + req.isWriteAsPdfA());
-
-        req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
-
-        if ("master".equals(folderName)) {
-            req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
-        } else { // media
-            req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
-        }
-
-        try (OutputStream os =
-                Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
-            new GetMetsPdfAction().writePdf(req, csConfig, os);
-
-        } catch (ContentLibException e) {
-            log.error(e);
-            Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
      * create single pages
      * 
-     * @param p Goobi process
-     * @param folderName name of the image folder, either "master" or "media"
-     * @param pdfConfigVariant name of the config variant that shall be used
      * @return the list of all generated single pages if successful, null otherwise
      * @throws SwapException
      * @throws DAOException
      * @throws IOException
      */
-    private List<File> createSinglePages(Process p, String folderName, String pdfConfigVariant) throws IOException, SwapException, DAOException {
+    private List<File> createSinglePagePdfs(Path pdfDir) throws IOException, SwapException, DAOException {
 
-        Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
-
-        if (!Files.exists(pdfDir)) {
-            Files.createDirectories(pdfDir);
-        }
-
-        Path altoDir = Paths.get(p.getOcrAltoDirectory());
+        Path altoDir = Paths.get(process.getOcrAltoDirectory());
         Path sourceDir = null;
 
-        if ("master".equals(folderName)) {
-            sourceDir = Paths.get(p.getImagesOrigDirectory(false));
+        if ("master".equals(imageFolder)) {
+            sourceDir = Paths.get(process.getImagesOrigDirectory(false));
         } else { // use media otherwise
-            sourceDir = Paths.get(p.getImagesTifDirectory(false));
+            sourceDir = Paths.get(process.getImagesTifDirectory(false));
         }
 
         List<File> pdfFiles = new ArrayList<>();
@@ -399,7 +248,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
                 } catch (ContentLibException e) {
                     log.error(e);
-                    Helper.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+                    Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
                     return null;
                 }
             }
@@ -411,18 +260,11 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     /**
      * merge a list of pages into a whole PDF file
      * 
-     * @param p Goobi process
      * @param pdfFiles the list of single pages that shall be merged
      * @throws IOException
      */
-    private void mergePages(Process p, List<File> pdfFiles) throws IOException {
-        Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
-        Path fullPdfFile = fullPdfDir.resolve(p.getTitel() + ".pdf");
-
-        if (!Files.exists(fullPdfDir)) {
-            Files.createDirectories(fullPdfDir);
-        }
-
+    private void createFullPdfFromSinglePagePdfs(List<File> pdfFiles, Path fullPdfDir) throws IOException {
+        Path fullPdfFile = fullPdfDir.resolve(process.getTitel() + ".pdf");
         PDFMergerUtility pdfMerger = new PDFMergerUtility();
         Collections.sort(pdfFiles);
 
@@ -433,45 +275,90 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         try (OutputStream os =
                 Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
             pdfMerger.setDestinationStream(os);
-            pdfMerger.mergeDocuments(MemoryUsageSetting.setupMixed(524288000l).streamCache);
+            pdfMerger.mergeDocuments(null);
         }
     }
 
     /**
-     * was used to generate single pages via splitting the full PDF file, but it doesn't work correctly with PDF/A file
+     * create a full PDF file from METS file
      * 
-     * @param pdfDir Path of the PDF directory
-     * @param fullPdfFile Path to the full PDF file
-     * @param altoDir Path of the ALTO directory as String
-     * @throws PDFWriteException
-     * @throws PDFReadException
+     * @return true if the full PDF file is successfully generated, false otherwise
      * @throws IOException
+     * @throws SwapException
+     * @throws URISyntaxException
+     * @throws DAOException
      */
-    public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir) throws PDFWriteException, PDFReadException, IOException {
-        List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
-        String[] altoNames = new File(altoDir).list();
+    private boolean createFullPdfFromMets(Path fullPdfDir)
+            throws IOException, SwapException, URISyntaxException, DAOException {
 
-        if (altoNames != null) {
-            Arrays.sort(altoNames);
+        Path metsP = Paths.get(process.getMetadataFilePath());
+        Path fullPdfFile = fullPdfDir.resolve(process.getTitel() + ".pdf");
+
+        ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
+        Map<String, String> parameters = new HashMap<>();
+        // set the configured variant as value of the key "config" to use this config
+        // if the variant is not configured in Goobi/src/main/resources/contentServerConfig.xml, then default settings will be used
+        parameters.put("config", pdfConfigVariant);
+        MetsPdfRequest req = new MetsPdfRequest(0, metsP.toUri(), null, true, parameters);
+
+        log.debug("req.isWriteAsPdfa = " + req.isWriteAsPdfA());
+
+        req.setAltoSource(Paths.get(process.getOcrAltoDirectory()).toUri());
+
+        if ("master".equals(imageFolder)) {
+            req.setImageSource(Paths.get(process.getImagesOrigDirectory(false)).toUri());
+        } else { // media
+            req.setImageSource(Paths.get(process.getImagesTifDirectory(false)).toUri());
         }
 
-        Collections.sort(createdPdfs);
+        try (OutputStream os =
+                Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
+            new GetMetsPdfAction().writePdf(req, csConfig, os);
 
-        for (int i = createdPdfs.size() - 1; i >= 0; i--) {
-            File pdfFile = createdPdfs.get(i);
-            Path newPath = null;
-
-            if (altoNames != null && altoNames.length == createdPdfs.size()) {
-                String altoName = altoNames[i];
-                String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
-                newPath = pdfFile.toPath().resolveSibling(newName);
-            } else {
-                newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
-            }
-
-            Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
+        } catch (ContentLibException e) {
+            log.error(e);
+            Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+            return false;
         }
+
+        return true;
     }
+
+    //    /**
+    //     * was used to generate single pages via splitting the full PDF file, but it doesn't work correctly with PDF/A file
+    //     *
+    //     * @param pdfDir Path of the PDF directory
+    //     * @param fullPdfFile Path to the full PDF file
+    //     * @param altoDir Path of the ALTO directory as String
+    //     * @throws PDFWriteException
+    //     * @throws PDFReadException
+    //     * @throws IOException
+    //     */
+    //    public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir) throws PDFWriteException, PDFReadException, IOException {
+    //        List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
+    //        String[] altoNames = new File(altoDir).list();
+    //
+    //        if (altoNames != null) {
+    //            Arrays.sort(altoNames);
+    //        }
+    //
+    //        Collections.sort(createdPdfs);
+    //
+    //        for (int i = createdPdfs.size() - 1; i >= 0; i--) {
+    //            File pdfFile = createdPdfs.get(i);
+    //            Path newPath = null;
+    //
+    //            if (altoNames != null && altoNames.length == createdPdfs.size()) {
+    //                String altoName = altoNames[i];
+    //                String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
+    //                newPath = pdfFile.toPath().resolveSibling(newName);
+    //            } else {
+    //                newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
+    //            }
+    //
+    //            Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
+    //        }
+    //    }
 
     @Override
     public int getInterfaceVersion() {

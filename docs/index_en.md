@@ -28,55 +28,15 @@ Once the plugin has been installed correctly, it can be configured in the user i
 
 
 ## Configuration
-An example configuration could look like this:
+The plugin is configured in the file `plugin_intranda_step_zbz_order_delivery.xml` as shown here:
 
-```xml
-<config_plugin>
-    <!-- order of configuration is: 
-         1.) project name and step name matches 
-         2.) step name matches and project is * 
-         3.) project name matches and step name is * 
-         4.) project name and step name are * 
-    -->
-    <config>
-        <!-- which projects to use for (can be more then one, otherwise use *) -->
-        <project>*</project>
+{{CONFIG_CONTENT}}
 
-        <!-- which stepss to use for (can be more then one, otherwise use *) -->
-        <step>*</step>
-
-         <!-- Choose the source images folder that shall be used for PDF generation. Possible values are 'media' and 'master' -->
-        <imagesFolder>media</imagesFolder>
-
-        <!-- If set to true, then PDF files for every single image are generated before the full PDF file. -->
-        <!-- If set to false, then PDF files for every single image are generated after the full PDF file. -->
-        <pagePdf enabled="true" /> 
-
-        <!-- If enabled, a PDF file for the entire record is generated. This file includes the table of contents from the METS file if exists. -->
-        <!-- The attribute pdfConfigVariant sets up which config variant in contentServerConfig.xml should be used. If not set, then use default. -->
-        <fullPdf enabled="true" pdfConfigVariant="pdfa"/>
-        
-        <!-- If set, then the path will be used to export the results. Otherwise the default settings will be used. -->
-        <!-- Here is an ABSOLUTE path expected. -->
-        <exportPath>/tmp/export</exportPath>
-    </config>
-    
-    <config>
-        <project>testocr</project>
-        <step>testpdf</step>
-        <imagesFolder>master</imagesFolder>
-        <pagePdf enabled="true" />
-        <fullPdf enabled="false" />
-    </config>
-</config_plugin>
-```
-
-
-The parameters within this configuration file have the following meanings: ​
+{{CONFIG_DESCRIPTION_PROJECT_STEP}}
 
 | Value | Description |
 | :--- | :--- |
 | `imageFolder` | This parameter expects the name of the image folder. Possible values are `media` and `master`, anything else will be regarded as `media`. |
-| `pagePdf` | This parameter determines the order of PDF files' generation. If set `true`, then single files are generated before the full PDF file; if set `false` then the other way around. |
-| `fullPdf` | This parameter has two attributes. The first one `enabled` is mandatory and determines whether or not to generate a full PDF file. The second one `pdfConfigVariant` is optional and controls which config variant shall be used, and if not set, then `default` will be used. |
-| `exportPath` | This optional parameter can be used to set up another path to export the PDF files. An absolute path is expected if in use. If not set, then the default settings will be used. |
+| `singlePagePdf` | The `enabled` attribute of this parameter determines whether single-page PDFs are to be generated. |
+| `fullPdf` | The `enabled` attribute of this parameter determines whether a complete PDF is to be generated. The `mode` attribute controls how this PDF is to be generated. The value ‘mets’ is available for this in order to generate the PDF based on the METS file. Alternatively, the value ‘singlepages’ can be used to generate the overall PDF from the previously created single-page PDFs. The single-page PDFs are only generated temporarily if they have not already been activated within the configuration. The `pdfConfigVariant` attribute, on the other hand, is optional and determines which configuration variant is to be used. If it is not set, `default` is used. |
+| `exportPath` | This optional parameter can be used to specify a path for exporting the PDF files. If it is used, an absolute path is expected. If it is not specified, the PDF files are created within the `ocr` directory of the process. |
