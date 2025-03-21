@@ -28,7 +28,7 @@ Once the plugin has been installed correctly, it can be configured in the user i
 
 
 ## Configuration
-The plugin is configured in the file `plugin_intranda_step_zbz_order_delivery.xml` as shown here:
+The plugin is configured in the file `plugin_intranda_step_createfullpdf.xml` as shown here:
 
 {{CONFIG_CONTENT}}
 
