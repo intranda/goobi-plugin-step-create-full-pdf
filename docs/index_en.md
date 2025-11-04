@@ -3,6 +3,10 @@ title: Generation of PDF files
 identifier: intranda_step_createfullpdf
 published: true
 description: This is the technical documentation for the Goobi plugin for automatically creating PDF files out of images.
+keywords:
+    - Goobi workflow
+    - Plugin
+    - Step Plugin
 ---
 ## Introduction
 This documentation describes how to install and configure this plugin to create PDF files out of images.
