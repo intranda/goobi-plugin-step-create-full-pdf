@@ -12,8 +12,12 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.apache.commons.configuration.SubnodeConfiguration;
 import org.apache.commons.lang.StringUtils;
@@ -40,6 +44,7 @@ import de.unigoettingen.sub.commons.contentlib.exceptions.ContentLibException;
 import de.unigoettingen.sub.commons.contentlib.servlet.controller.GetPdfAction;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.ContentServerConfiguration;
 import de.unigoettingen.sub.commons.contentlib.servlet.model.MetsPdfRequest;
+import de.unigoettingen.sub.commons.contentlib.servlet.model.SinglePdfRequest;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j;
 import net.xeoh.plugins.base.annotations.PluginImplementation;
@@ -64,6 +69,21 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
     private boolean fullPdf;
     private String fullPdfMode;
     private String pdfConfigVariant;
+
+    private SubnodeConfiguration config;
+    private final ConfigurationHelper goobiConfig;
+    private final MessageHelper messages;
+
+    public CreateFullPdfPlugin() {
+        this.goobiConfig = ConfigurationHelper.getInstance();
+        this.messages = (id, type, message) -> Helper.addMessageToProcessJournal(id, type, message);
+    }
+
+    public CreateFullPdfPlugin(SubnodeConfiguration config, ConfigurationHelper goobiConfig, MessageHelper messages) {
+        this.config = config;
+        this.goobiConfig = goobiConfig;
+        this.messages = messages;
+    }
 
     @Override
     public void initialize(Step step, String returnPath) {
@@ -117,13 +137,17 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         log.debug("================= STARTING CREATE-FULL-PDF PLUGIN =================");
 
         process = step.getProzess();
-        SubnodeConfiguration config = ConfigPlugins.getProjectAndStepConfig(title, step);
+        SubnodeConfiguration config = this.config == null ? ConfigPlugins.getProjectAndStepConfig(title, step) : this.config;
 
         imageFolder = config.getString("/imageFolder", "media");
         singlePagePdf = config.getBoolean("/singlePagePdf/@enabled", false);
         fullPdf = config.getBoolean("/fullPdf/@enabled", false);
         fullPdfMode = config.getString("/fullPdf/@mode", "mets").toLowerCase();
         pdfConfigVariant = config.getString("/fullPdf/@pdfConfigVariant", "default");
+        String groupingRegex = config.getString("/groupingRegex", "");
+        if (StringUtils.isNotBlank(groupingRegex)) {
+            fullPdfMode = "singlepages"; //if we group the pdf by filenames, we cannot use "mets" pdf mode
+        }
 
         try {
 
@@ -152,7 +176,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 boolean ok = createFullPdfFromMets(fullPdfFolder);
                 if (!ok) {
                     log.error("An error happened while trying to create full PDF based on METS file.");
-                    Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR,
+                    messages.addMessageToProcessJournal(process.getId(), LogType.ERROR,
                             "An error happened while trying to create full PDF based on METS file.");
                     return PluginReturnValue.ERROR;
                 }
@@ -168,9 +192,10 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                 }
                 // do the pdf generation
                 singlePagePdfFiles = createSinglePagePdfs(singlePagePdfFolder);
+
                 if (singlePagePdfFiles == null) {
                     log.error("An error happened while trying to create single page PDF files.");
-                    Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR,
+                    messages.addMessageToProcessJournal(process.getId(), LogType.ERROR,
                             "An error happened while trying to create single page PDF files.");
                     return PluginReturnValue.ERROR;
                 }
@@ -184,17 +209,22 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
                     Files.createDirectories(fullPdfFolder);
                 }
                 // do pdf generation based on single page pdfs
-                createFullPdfFromSinglePagePdfs(singlePagePdfFiles, fullPdfFolder);
+                if (StringUtils.isNotBlank(groupingRegex)) {
+                    createFullPdfsFromSinglePagePdfs(singlePagePdfFolder, fullPdfFolder, groupingRegex);
+                } else {
+                    createFullPdfFromSinglePagePdfs(process.getTitel(), singlePagePdfFiles, fullPdfFolder);
+                }
             }
 
             // clean up single page PDF folder if just needed for full pdf generation
             if (!singlePagePdf && (fullPdf && !"mets".equals(fullPdfMode))) {
                 StorageProvider.getInstance().deleteDir(singlePagePdfFolder);
+
             }
 
         } catch (URISyntaxException | IOException | SwapException | DAOException e) {
             log.error(e);
-            Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+            messages.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE);
             return PluginReturnValue.ERROR;
         }
 
@@ -248,7 +278,7 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
                 } catch (ContentLibException e) {
                     log.error(e);
-                    Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+                    messages.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE);
                     return null;
                 }
             }
@@ -257,14 +287,73 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
         return pdfFiles;
     }
 
+    private boolean createMultiPagePdf(Process p, String folderName, List<String> imageFilenames, String pdfConfigVariant, String pdfName)
+            throws IOException, SwapException, URISyntaxException, DAOException {
+
+        Path pdfDir = exportDirectory.resolve(processOcrPdfDirectoryName);
+
+        Path fullPdfDir = exportDirectory.resolve(p.getTitel() + "_fullpdf");
+        Path fullPdfFile = fullPdfDir.resolve(pdfName + ".pdf");
+
+        if (!Files.exists(pdfDir)) {
+            Files.createDirectories(pdfDir);
+        }
+
+        if (!Files.exists(fullPdfDir)) {
+            Files.createDirectories(fullPdfDir);
+        }
+
+        ContentServerConfiguration csConfig = ContentServerConfiguration.getInstance();
+        Map<String, String> parameters = new HashMap<>();
+        // set the configured variant as value of the key "config" to use this config
+        // if the variant is not configured in Goobi/src/main/resources/contentServerConfig.xml, then default settings will be used
+        parameters.put("config", pdfConfigVariant);
+        SinglePdfRequest req = new SinglePdfRequest(0, StringUtils.join(imageFilenames, "$"), parameters);
+
+        log.debug("req.isWriteAsPdfa = " + req.isWriteAsPdfA());
+
+        req.setAltoSource(Paths.get(p.getOcrAltoDirectory()).toUri());
+
+        if ("master".equals(folderName)) {
+            req.setImageSource(Paths.get(p.getImagesOrigDirectory(false)).toUri());
+        } else { // media
+            req.setImageSource(Paths.get(p.getImagesTifDirectory(false)).toUri());
+        }
+
+        try (OutputStream os =
+                Files.newOutputStream(fullPdfFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
+            new GetMetsPdfAction().writePdf(req, csConfig, os);
+
+        } catch (ContentLibException e) {
+            log.error(e);
+            messages.addMessageToProcessJournal(p.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void createFullPdfsFromSinglePagePdfs(Path singlePdfFolder, Path fullPdfDir, String groupingRegex) throws IOException {
+
+        Map<String, List<String>> pdfGroups = groupPdfs(singlePdfFolder, groupingRegex, process.getTitel());
+        for (String groupName : pdfGroups.keySet()) {
+            List<File> pdfFiles = pdfGroups.get(groupName)
+                    .stream()
+                    .map(filename -> singlePdfFolder.resolve(filename))
+                    .map(Path::toFile)
+                    .collect(Collectors.toList());
+            createFullPdfFromSinglePagePdfs(groupName, pdfFiles, fullPdfDir);
+        }
+    }
+
     /**
      * merge a list of pages into a whole PDF file
      * 
      * @param pdfFiles the list of single pages that shall be merged
      * @throws IOException
      */
-    private void createFullPdfFromSinglePagePdfs(List<File> pdfFiles, Path fullPdfDir) throws IOException {
-        Path fullPdfFile = fullPdfDir.resolve(process.getTitel() + ".pdf");
+    private void createFullPdfFromSinglePagePdfs(String pdfBaseName, List<File> pdfFiles, Path fullPdfDir) throws IOException {
+        Path fullPdfFile = fullPdfDir.resolve(pdfBaseName + ".pdf");
         PDFMergerUtility pdfMerger = new PDFMergerUtility();
         Collections.sort(pdfFiles);
 
@@ -317,48 +406,65 @@ public class CreateFullPdfPlugin implements IStepPluginVersion2 {
 
         } catch (ContentLibException e) {
             log.error(e);
-            Helper.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE, "");
+            messages.addMessageToProcessJournal(process.getId(), LogType.ERROR, ERROR_CREATING_MESSAGE);
             return false;
         }
 
         return true;
     }
 
-    //    /**
-    //     * was used to generate single pages via splitting the full PDF file, but it doesn't work correctly with PDF/A file
-    //     *
-    //     * @param pdfDir Path of the PDF directory
-    //     * @param fullPdfFile Path to the full PDF file
-    //     * @param altoDir Path of the ALTO directory as String
-    //     * @throws PDFWriteException
-    //     * @throws PDFReadException
-    //     * @throws IOException
-    //     */
-    //    public static void splitPdf(Path pdfDir, Path fullPdfFile, String altoDir) throws PDFWriteException, PDFReadException, IOException {
-    //        List<File> createdPdfs = PDFConverter.writeSinglePagePdfs(fullPdfFile.toFile(), pdfDir.toFile());
-    //        String[] altoNames = new File(altoDir).list();
-    //
-    //        if (altoNames != null) {
-    //            Arrays.sort(altoNames);
-    //        }
-    //
-    //        Collections.sort(createdPdfs);
-    //
-    //        for (int i = createdPdfs.size() - 1; i >= 0; i--) {
-    //            File pdfFile = createdPdfs.get(i);
-    //            Path newPath = null;
-    //
-    //            if (altoNames != null && altoNames.length == createdPdfs.size()) {
-    //                String altoName = altoNames[i];
-    //                String newName = altoName.substring(0, altoName.lastIndexOf('.')) + ".pdf";
-    //                newPath = pdfFile.toPath().resolveSibling(newName);
-    //            } else {
-    //                newPath = pdfFile.toPath().resolveSibling(String.format("%08d.pdf", i + 1));
-    //            }
-    //
-    //            Files.move(pdfFile.toPath(), newPath, StandardCopyOption.REPLACE_EXISTING);
-    //        }
-    //    }
+    /**
+     * Groups image files in sourceDir by the first capture group of the given regex. Files that do not match are placed in the catch-all group keyed
+     * by defaultGroupName. The returned map preserves insertion order (files are processed in sorted order).
+     */
+    private Map<String, List<String>> groupPdfs(Path sourceDir, String regex, String defaultGroupName) throws IOException {
+        Pattern pattern = Pattern.compile(regex);
+        Map<String, List<String>> groups = new LinkedHashMap<>();
+
+        List<Path> pdfFiles = new ArrayList<>();
+        try (DirectoryStream<Path> dirStream =
+                Files.newDirectoryStream(sourceDir, path -> NIOFileUtils.checkPdfType(path.getFileName().toString()))) {
+            for (Path pdfPage : dirStream) {
+                pdfFiles.add(pdfPage);
+            }
+        }
+        Collections.sort(pdfFiles);
+
+        for (Path pdfPage : pdfFiles) {
+            String filename = pdfPage.getFileName().toString();
+            Matcher matcher = pattern.matcher(filename);
+            String groupKey = (matcher.find() && matcher.groupCount() >= 1) ? matcher.group(1) : defaultGroupName;
+            groups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(filename);
+        }
+
+        return groups;
+    }
+
+    /**
+     * Groups image files in sourceDir by the first capture group of the given regex. Files that do not match are placed in the catch-all group keyed
+     * by defaultGroupName. The returned map preserves insertion order (files are processed in sorted order).
+     */
+    private Map<String, List<String>> groupImages(Path sourceDir, String regex, String defaultGroupName) throws IOException {
+        Pattern pattern = Pattern.compile(regex);
+        Map<String, List<String>> groups = new LinkedHashMap<>();
+
+        List<Path> imageFiles = new ArrayList<>();
+        try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(sourceDir, NIOFileUtils.imageNameFilter)) {
+            for (Path imageFile : dirStream) {
+                imageFiles.add(imageFile);
+            }
+        }
+        Collections.sort(imageFiles);
+
+        for (Path imageFile : imageFiles) {
+            String filename = imageFile.getFileName().toString();
+            Matcher matcher = pattern.matcher(filename);
+            String groupKey = (matcher.find() && matcher.groupCount() >= 1) ? matcher.group(1) : defaultGroupName;
+            groups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(filename);
+        }
+
+        return groups;
+    }
 
     @Override
     public int getInterfaceVersion() {

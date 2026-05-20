@@ -5,6 +5,6 @@
 		<exec executable="mvn">
 			<arg value="package" />
 		</exec>
-		<copy file="target/plugin_intranda_step_createfullpdf.jar" todir="/opt/digiverso/goobi/plugins/step/"/>
+		<copy file="module-base/target/plugin-step-create-full-pdf-base.jar" todir="/opt/digiverso/goobi/plugins/step/"/>
 	</target>
 </project>
